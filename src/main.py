@@ -14,6 +14,13 @@ def run_pipeline(root: str, out_dir: str):
         print("No field vector found in workspace.")
     else:
         print("Loaded fields:", len(fields))
+
+
+    try:
+        fields_whg = data_loader.add_whg_geoms_to_fields(fields, scan["shapefiles"], name_hint="WHGGewAbstand_Polygone")
+    except Exception as e:
+        print("Failed to attach WHG geometries:", e)
+
     # load water layers - look in Maps/ and root for likely water layers
     waters = data_loader.load_first_vector([p for p in scan["shapefiles"] + scan["geojson"] + scan["geopackages"] if "water" in p.lower() or "gew" in p.lower()])
     # parse N docs
@@ -26,11 +33,16 @@ def run_pipeline(root: str, out_dir: str):
     if not fields.empty and not waters.empty:
         fields = analysis.compute_distance_to_water(fields, waters)
     fields = analysis.compute_n_loads(fields, n_df)
+    print("Analysis complete.")
     # save outputs
     out_csv = os.path.join(out_dir, "fields_n_loads.csv")
     fields.drop(columns=["geometry"], errors="ignore").to_csv(out_csv, index=False)
     out_geo = os.path.join(out_dir, "fields_n_loads.geojson")
     fields.to_file(out_geo, driver="GeoJSON")
+    
+    out_geo = os.path.join(out_dir, "restrictions.geojson")
+    fields_whg.to_file(out_geo, driver="GeoJSON")
+
     print("Outputs written to", out_dir)
 
 if __name__ == "__main__":
