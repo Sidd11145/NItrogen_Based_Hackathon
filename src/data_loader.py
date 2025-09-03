@@ -92,7 +92,6 @@ def add_whg_geoms_to_fields(
     fields_gdf: gpd.GeoDataFrame,
     shapefile_paths: List[str],
     name_hint: str = "WHGGewAbstand_Polygone",
-    col_name: str = "restrictions"
 ) -> gpd.GeoDataFrame:
     """
     Attach WHG 'Abstand' polygon geometries to each field row as raw GeoJSON geometry dicts.
@@ -102,20 +101,56 @@ def add_whg_geoms_to_fields(
       - Assigns the full list of geometries (as GeoJSON dicts) into column `col_name` for every field row.
       - If no geometries found, column contains None.
     """
-    out = fields_gdf.copy()
-    if out.empty:
-        return out
-
-    if not shapefile_paths:
-        out[col_name] = None
-        return out
-
     candidates = _find_shapefiles_by_name(shapefile_paths, name_hint=name_hint)
-    geoms = _load_shapefiles_geometries(candidates)
+    loaded: List[gpd.GeoDataFrame] = []
 
-    if not geoms:
-        out[col_name] = None
-    else:
-        out[col_name] = [geoms] * len(out)
+    # prefer fields CRS if available
+    target_crs = None
+    try:
+        if getattr(fields_gdf, "crs", None) is not None:
+            target_crs = fields_gdf.crs
+    except Exception:
+        target_crs = None
 
-    return out
+    for p in candidates:
+        try:
+            g = gpd.read_file(p)
+            g["source_file"] = os.path.basename(p)
+
+            # if we don't yet have a target CRS, take this layer's CRS
+            if target_crs is None and getattr(g, "crs", None) is not None:
+                target_crs = g.crs
+
+            # if layer has no CRS but we have a target, assume/set it (no transform)
+            if getattr(g, "crs", None) is None and target_crs is not None:
+                g = g.set_crs(target_crs, allow_override=True)
+
+            # if both CRSs exist and differ, transform layer to target_crs
+            if getattr(g, "crs", None) is not None and target_crs is not None and g.crs != target_crs:
+                try:
+                    g = g.to_crs(target_crs)
+                except Exception:
+                    # skip problematic transforms but keep layer as-is (will be skipped later)
+                    pass
+
+            loaded.append(g)
+        except Exception:
+            continue
+
+    if not loaded:
+        return gpd.GeoDataFrame(columns=["source_file", "geometry"], geometry="geometry")
+
+    # ensure all GeoDataFrames have the same geometry column and CRS before concat
+    for i, gg in enumerate(loaded):
+        if getattr(gg, "crs", None) is None and target_crs is not None:
+            loaded[i] = gg.set_crs(target_crs, allow_override=True)
+
+    restrictions = pd.concat(loaded, ignore_index=True, sort=False)
+    restrictions = gpd.GeoDataFrame(restrictions, geometry="geometry")
+    if target_crs is not None:
+        try:
+            restrictions = restrictions.set_crs(target_crs, allow_override=True)
+        except Exception:
+            pass
+
+    return restrictions

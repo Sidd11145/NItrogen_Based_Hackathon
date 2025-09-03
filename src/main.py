@@ -15,9 +15,9 @@ def run_pipeline(root: str, out_dir: str):
     else:
         print("Loaded fields:", len(fields))
 
+
     try:
-        # fields = data_loader.add_whg_geoms_to_fields(fields, scan["shapefiles"], name_hint="WHGGewAbstand_Polygone", col_name="restrictions")
-        print("Attached WHG geometries to fields (column 'restrictions').")
+        fields_whg = data_loader.add_whg_geoms_to_fields(fields, scan["shapefiles"], name_hint="WHGGewAbstand_Polygone")
     except Exception as e:
         print("Failed to attach WHG geometries:", e)
 
@@ -39,6 +39,10 @@ def run_pipeline(root: str, out_dir: str):
     fields.drop(columns=["geometry"], errors="ignore").to_csv(out_csv, index=False)
     out_geo = os.path.join(out_dir, "fields_n_loads.geojson")
     fields.to_file(out_geo, driver="GeoJSON")
+    
+    out_geo = os.path.join(out_dir, "restrictions.geojson")
+    fields_whg.to_file(out_geo, driver="GeoJSON")
+
     print("Outputs written to", out_dir)
 
 if __name__ == "__main__":
