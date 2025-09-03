@@ -65,3 +65,57 @@ def load_bewirtschaftungs_docs(folder: str) -> pd.DataFrame:
             p = os.path.join(folder, fn)
             records.extend(extract_n_from_pdf(p))
     return pd.DataFrame(records)
+
+def _find_shapefiles_by_name(shapefiles: List[str], name_hint: str = "WHGGewAbstand_Polygone") -> List[str]:
+    """Return shapefile paths whose filename contains the name_hint (case-insensitive).
+    If none match, return the original list (so caller can still attempt to load)."""
+    if not shapefiles:
+        return []
+    matches = [p for p in shapefiles if name_hint.lower() in os.path.basename(p).lower()]
+    return matches if matches else shapefiles
+
+def _load_shapefiles_geometries(paths: List[str]) -> List[dict]:
+    """Load geometries from given shapefile paths and return list of GeoJSON geometry dicts.
+    If a shapefile fails to load it is skipped."""
+    geoms: List[dict] = []
+    for p in paths:
+        try:
+            g = gpd.read_file(p)
+            for geom in g.geometry:
+                geoms.append(geom.__geo_interface__ if geom is not None else None)
+        except Exception:
+            # skip files that fail to read
+            continue
+    return geoms
+
+def add_whg_geoms_to_fields(
+    fields_gdf: gpd.GeoDataFrame,
+    shapefile_paths: List[str],
+    name_hint: str = "WHGGewAbstand_Polygone",
+    col_name: str = "restrictions"
+) -> gpd.GeoDataFrame:
+    """
+    Attach WHG 'Abstand' polygon geometries to each field row as raw GeoJSON geometry dicts.
+    Behavior:
+      - Does NOT perform CRS alignment or spatial intersection.
+      - Loads shapefile(s) that match name_hint (or falls back to any provided shapefiles).
+      - Assigns the full list of geometries (as GeoJSON dicts) into column `col_name` for every field row.
+      - If no geometries found, column contains None.
+    """
+    out = fields_gdf.copy()
+    if out.empty:
+        return out
+
+    if not shapefile_paths:
+        out[col_name] = None
+        return out
+
+    candidates = _find_shapefiles_by_name(shapefile_paths, name_hint=name_hint)
+    geoms = _load_shapefiles_geometries(candidates)
+
+    if not geoms:
+        out[col_name] = None
+    else:
+        out[col_name] = [geoms] * len(out)
+
+    return out
